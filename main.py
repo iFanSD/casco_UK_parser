@@ -5,17 +5,19 @@ import csv
 import requests
 from bs4 import BeautifulSoup as BS
 import pytz
-
 import lxml
 
+# add to list from categories.csv
+ignored_categories = []
 
 session = requests.Session()
 
+
 # ###### Uncomment to run with proxies   ###############################
 
-#
-# start_with_proxy = input('Run with proxy?(y/n):')
 
+# start_with_proxy = input('Run with proxy?(y/n):')
+#
 # if start_with_proxy.strip() == 'y':
 #     proxy = {
 #         "http": "http://demoend:test123@35.230.150.209:3128/",
@@ -25,10 +27,6 @@ session = requests.Session()
 #     proxy = None
 # session.proxies.update(proxy)
 #########################################################################
-
-
-link_to_all_categories_xml = 'https://www.costco.co.uk/sitemap_uk_category.xml'
-
 
 
 def request(url, retry=5):
@@ -46,11 +44,11 @@ def request(url, retry=5):
         return response.text
 
 
-def save_links_to_csv(url='https://www.costco.co.uk/sitemap_uk_product.xml'):
+def save_links_to_csv(url='https://www.costco.co.uk/sitemap_uk_product.xml', name='links'):
     """Importing links from XML page to CSV"""
     xml_page = request(url=url)
     links = BS(xml_page, 'lxml').find_all('loc')
-    with open('links.csv', 'w') as csv_file:
+    with open(f'{name}.csv', 'w') as csv_file:
         spam = csv.writer(csv_file)
         for n, link in enumerate(links):
             spam.writerow([n + 1, link.get_text()])
@@ -63,17 +61,18 @@ def iter_links(source='data'):
             links = csv.reader(file)
             for link in links:
                 print(link)
-                print(f'req_start:{str(pytz.utc.localize(datetime.datetime.utcnow()))}')
+                if link[1][25:].split('/')[0] in ignored_categories:
+                    continue
                 html_page = request(url=link[1])
-                print(f'req_end:{str(pytz.utc.localize(datetime.datetime.utcnow()))}')
                 yield html_page
     else:
         xml_page = request(url='https://www.costco.co.uk/sitemap_uk_product.xml')
         links = BS(xml_page, 'lxml').find_all('loc')
         for link in links:
+            if link[25:].split('/')[0] in ignored_categories:
+                continue
             print(link.get_text())
             html_page = request(url=link.get_text())
-
             yield html_page
 
 
@@ -81,19 +80,12 @@ def parse_data(page):
     """Parse items"""
     soup = BS(page, 'lxml')
     all_json_data = soup.find_all('script', {'type': 'application/ld+json'})
-    print(f'1:{str(pytz.utc.localize(datetime.datetime.utcnow()))}')
+
     if len(list(all_json_data)) < 2:
-        if soup.find('ul', class_='product-listing product-grid') is None:  # There are no products in category
-            return None
-        else:  # page new product list
-            links = soup.find('ul', class_='product-listing product-grid').find_all('div',
-                                                                                    class_='product-name-container')
-            for link in links:
-                new_link = 'https://www.costco.co.uk' + link.find('a')['href']
-                parse_data(request(new_link))
+        return None
     json_data = all_json_data[1].get_text()
     data_raw = json.loads(json_data)
-    print(f'2:{str(pytz.utc.localize(datetime.datetime.utcnow()))}')
+
     try:
         image_url = soup.find('div', class_="product-image")['data-product-img-url']
     except:
@@ -129,25 +121,24 @@ def parse_data(page):
             'observed_date': str(pytz.utc.localize(datetime.datetime.utcnow()))
         }
     }
-    print(f'3:{str(pytz.utc.localize(datetime.datetime.utcnow()))}')
+
     return data
 
 
 def main():
     all_objects = []
-
     try:
         save_links_to_csv()
         for page in iter_links(source='links.csv'):
             get_data = parse_data(page)
-
-            all_objects.append(get_data)
+            if get_data:
+                all_objects.append(get_data)
             print(get_data)
     except Exception as ex:
         print(ex)
     finally:
         with open(f'output_json/data-{str(datetime.datetime.now())[:-7]}.json', 'w', encoding='utf-8') as json_file:
-            json.dump(all_objects, json_file, indent=4, allow_nan=False, separators=(',', ': '))
+            json.dump(all_objects, json_file, indent=4, separators=(',', ': '))
 
 
 if __name__ == '__main__':
