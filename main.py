@@ -12,8 +12,8 @@ session = requests.Session()
 
 # ###### Uncomment to run with proxies   ###############################
 
-
-start_with_proxy = input('Run with proxy?(y/n):')
+#
+# start_with_proxy = input('Run with proxy?(y/n):')
 
 # if start_with_proxy.strip() == 'y':
 #     proxy = {
