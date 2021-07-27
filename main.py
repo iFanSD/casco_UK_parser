@@ -5,6 +5,7 @@ import csv
 import requests
 from bs4 import BeautifulSoup as BS
 import pytz
+
 import lxml
 
 
@@ -134,6 +135,7 @@ def parse_data(page):
 
 def main():
     all_objects = []
+
     try:
         save_links_to_csv()
         for page in iter_links(source='links.csv'):
