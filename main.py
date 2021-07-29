@@ -5,27 +5,41 @@ import csv
 import requests
 from bs4 import BeautifulSoup as BS
 import pytz
-import lxml
 
-# add to list from categories.csv
-ignored_categories = []
+# Set to True to search all items
+search_all = False
+
+# If search_all False - add or remove categories (all types of catagories - in categories.csv)
+selected_categories = (
+    'Fitness-Well-Being',
+    'Furniture-Home',
+    'Mattresses-Beds'
+    'Electronics-Security',
+    'Computers',
+    'Appliances',
+    'Garden-Sheds-Patio',
+    'Wines-Spirits-Beer',
+    'Grocery-Household',
+    'Camping-Sports-Spas-Leisure',
+    'Home-Improvement',
+    'Tyres-Automotive',
+    'Toys-Baby-Child',
+    'Jewellery-Accessories-Clothing',
+    'Health-Wellness',
+    'Personal-Care',
+)
 
 session = requests.Session()
 
-
 # ###### Uncomment to run with proxies   ###############################
 
-
-# start_with_proxy = input('Run with proxy?(y/n):')
+# proxy = {
+#     "http": "http://demoend:test123@35.230.150.209:3128/",
+#     "https": "http://demoend:test123@35.230.150.209:3128"
+# }
 #
-# if start_with_proxy.strip() == 'y':
-#     proxy = {
-#         "http": "http://demoend:test123@35.230.150.209:3128/",
-#         "https": "http://demoend:test123@35.230.150.209:3128"
-#     }
-# elif start_with_proxy.strip() == 'n':
-#     proxy = None
 # session.proxies.update(proxy)
+
 #########################################################################
 
 
@@ -44,56 +58,47 @@ def request(url, retry=5):
         return response.text
 
 
-def save_links_to_csv(url='https://www.costco.co.uk/sitemap_uk_product.xml', name='links'):
-    """Importing links from XML page to CSV"""
+def save_links_to_csv(url='https://www.costco.co.uk/sitemap_uk_product.xml',selected_categories=selected_categories):
+    """Importing links from XML page to CSV-file"""
     xml_page = request(url=url)
     links = BS(xml_page, 'lxml').find_all('loc')
-    with open(f'{name}.csv', 'w') as csv_file:
+    n = 1
+    with open(f'links.csv', 'w') as csv_file:
         spam = csv.writer(csv_file)
-        for n, link in enumerate(links):
-            spam.writerow([n + 1, link.get_text()])
-
-
-def iter_links(source='data'):
-    """Link iteration from XML or CSV"""
-    if '.csv' in source:
-        with open(source) as file:
-            links = csv.reader(file)
-            for link in links:
-                print(link)
-                if link[1][25:].split('/')[0] in ignored_categories:
-                    continue
-                html_page = request(url=link[1])
-                yield html_page
-    else:
-        xml_page = request(url='https://www.costco.co.uk/sitemap_uk_product.xml')
-        links = BS(xml_page, 'lxml').find_all('loc')
         for link in links:
-            if link[25:].split('/')[0] in ignored_categories:
-                continue
-            print(link.get_text())
-            html_page = request(url=link.get_text())
-            yield html_page
+            main_category = link.get_text()[25:].split('/')[0]
+            if search_all or main_category in selected_categories:
+                spam.writerow([n, main_category, link.get_text()])
+                n += 1
+    return n
 
 
-def parse_data(page):
+def iter_links():
+    """Link iteration from CSV-file"""
+    with open('links.csv') as file:
+        links = csv.reader(file)
+        for link in links:
+            main_category = link[1]
+            html_page = request(url=link[2])
+            yield (html_page, main_category)
+
+
+def parse_data(page, category):
     """Parse items"""
     soup = BS(page, 'lxml')
     all_json_data = soup.find_all('script', {'type': 'application/ld+json'})
-
-    if len(list(all_json_data)) < 2:
+    if len(all_json_data) < 2:
         return None
     json_data = all_json_data[1].get_text()
     data_raw = json.loads(json_data)
-
     try:
         image_url = soup.find('div', class_="product-image")['data-product-img-url']
     except:
         image_url = None
     try:
-        category = soup.find('ol', class_='breadcrumb').find_all('li')[-1].a.get('title')
+        subcategory = soup.find('ol', class_='breadcrumb').find_all('li')[-1].a.get('title')
     except:
-        category = None
+        subcategory = None
     try:
         brand = data_raw['brand']["name"]
     except:
@@ -109,6 +114,7 @@ def parse_data(page):
             'name': data_raw.get("name"),
             'currency': 'GBP',
             'category': category,
+            'subcategory': subcategory,
             'brand': brand,
             'country': 'UK',
             'availability': availability,
@@ -121,24 +127,25 @@ def parse_data(page):
             'observed_date': str(pytz.utc.localize(datetime.datetime.utcnow()))
         }
     }
-
     return data
 
 
 def main():
     all_objects = []
     try:
-        save_links_to_csv()
-        for page in iter_links(source='links.csv'):
-            get_data = parse_data(page)
+        number_of_links = save_links_to_csv()
+        for n, page in enumerate(iter_links()):
+            print(f'{n} of {number_of_links}')
+            get_data = parse_data(*page)
             if get_data:
                 all_objects.append(get_data)
             print(get_data)
     except Exception as ex:
         print(ex)
     finally:
+        print(f'saving to output_json/data-{str(datetime.datetime.now())[:-7]}.json')
         with open(f'output_json/data-{str(datetime.datetime.now())[:-7]}.json', 'w', encoding='utf-8') as json_file:
-            json.dump(all_objects, json_file, indent=4, separators=(',', ': '))
+            json.dump(all_objects, json_file, indent=4, separators=(',', ': '), ensure_ascii=False)
 
 
 if __name__ == '__main__':
